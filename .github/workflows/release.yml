@@ -5,23 +5,55 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-release:
+  build-multi-platform:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 赋予脚本在你的仓库里创建 Release 发布的权限
+      contents: write # 赋予创建 Release 发布的权限
     steps:
-      # 1. 拉取最新代码（升级至现代版 v4）
+      # 1. 拉取最新代码
       - uses: actions/checkout@v4
 
-      # 2. 安装 Linux 编译基础工具箱
-      - name: Set up Build
-        run: sudo apt update && sudo apt install -y make gcc
+      # 2. 一口气安装多平台编译器（包含标准的 GCC、Windows 的 MinGW、ARM 的 GCC）
+      - name: Set up Cross-Compilers
+        run: |
+          sudo apt update
+          sudo apt install -y make gcc gcc-mingw-w64-x86-64 gcc-aarch64-linux-gnu
 
-      # 3. 开始编译
-      - name: Build KMS
-        run: make
+      # 3. 分别编译各个平台的版本，并整齐地分类存入文件夹
+      - name: Build Multi-Platform Binaries
+        run: |
+          # 创建分类文件夹
+          mkdir -p my_binaries/windows-x64
+          mkdir -p my_binaries/linux-x64
+          mkdir -p my_binaries/linux-arm64
+          
+          # 【第一步】编译标准的 Linux x64 版本（适合普通 64位 PC、软路由等）
+          echo "正在编译 Linux-x64 版本..."
+          make
+          cp bin/vlmcsd my_binaries/linux-x64/vlmcsd
+          cp bin/vlmcs my_binaries/linux-x64/vlmcs
+          make clean # 清理缓存，防止影响下一个平台的编译
+          
+          # 【第二步】交叉编译 Windows 64位版本（生成真正的 .exe 文件）
+          echo "正在编译 Windows-x64 版本..."
+          LDFLAGS=-static CC=x86_64-w64-mingw32-gcc make
+          cp bin/vlmcsd my_binaries/windows-x64/vlmcsd.exe
+          cp bin/vlmcs my_binaries/windows-x64/vlmcs.exe
+          make clean
+          
+          # 【第三步】交叉编译 Linux ARM64 版本（适合树莓派、ARM 架构 VPS 等）
+          echo "正在编译 Linux-ARM64 版本..."
+          CC=aarch64-linux-gnu-gcc make
+          cp bin/vlmcsd my_binaries/linux-arm64/vlmcsd
+          cp bin/vlmcs my_binaries/linux-arm64/vlmcs
+          make clean
 
-      # 4. 自动清理旧版本并发布新版本（使用 GitHub 官方原生工具，永不过期）
+      # 4. 把刚刚生成的 my_binaries 文件夹，打包压缩成 binaries.tar.gz
+      - name: Pack Binaries into tar.gz
+        run: |
+          tar -czvf binaries.tar.gz my_binaries/
+
+      # 5. 自动清理旧版本并发布全新的“多平台大礼包”
       - name: Create and Upload Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -29,7 +61,7 @@ jobs:
           echo "正在清理可能存在的同名旧版本..."
           gh release delete manual-release --yes --cleanup-tag || true
           
-          echo "正在创建新版本并上传编译成品..."
-          gh release create manual-release bin/vlmcsd \
-            --title "Manual Release" \
-            --notes "由 GitHub Actions 自动化编译完成。若需重新编译，直接再次运行即可，无需手动删除此页面。"
+          echo "正在创建新版本并上传多平台打包文件..."
+          gh release create manual-release binaries.tar.gz \
+            --title "Manual Release (Multi-Platform)" \
+            --notes "编译已完成！解压后你会看到 my_binaries 文件夹，里面包含了 Windows-x64, Linux-x64, Linux-ARM64 独立平台的专用文件。按需取用即可！"
