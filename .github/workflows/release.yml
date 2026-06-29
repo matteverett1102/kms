@@ -5,44 +5,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 赋予脚本在你的仓库里创建 Release 发布的权限
     steps:
-      - uses: actions/checkout@v2
+      # 1. 拉取最新代码（升级至现代版 v4）
+      - uses: actions/checkout@v4
 
+      # 2. 安装 Linux 编译基础工具箱
       - name: Set up Build
         run: sudo apt update && sudo apt install -y make gcc
 
+      # 3. 开始编译
       - name: Build KMS
         run: make
 
-      - name: Upload Release Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: kms-executable
-          path: bin/vlmcsd
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      # 4. 自动清理旧版本并发布新版本（使用 GitHub 官方原生工具，永不过期）
+      - name: Create and Upload Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: "manual-release"
-          release_name: "Manual Release"
-          draft: false
-          prerelease: false
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: bin/vlmcsd
-          asset_name: vlmcsd
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "正在清理可能存在的同名旧版本..."
+          gh release delete manual-release --yes --cleanup-tag || true
+          
+          echo "正在创建新版本并上传编译成品..."
+          gh release create manual-release bin/vlmcsd \
+            --title "Manual Release" \
+            --notes "由 GitHub Actions 自动化编译完成。若需重新编译，直接再次运行即可，无需手动删除此页面。"
